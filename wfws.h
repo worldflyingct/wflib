@@ -4,10 +4,8 @@
 #include "wfasyncio.h"
 
 typedef struct WFWS WFWS;
+typedef int (*Wf_Nio_Ws_New_Socket) (WF_NIO *asyncio, int fd, void *ptr);
 
-int Create_Ws_Server (unsigned short port, int max_connect);
-int Read_Ws_Socket (WFASYNCIO *asyncio, int fd, void *ws);
-int Write_Ws_Socket (WFASYNCIO *asyncio, int fd, void *ws);
-int Error_Ws_Socket (WFASYNCIO *asyncio, int fd, void *ws, uint32_t events);
+int Wf_Nio_Create_Ws_Server (unsigned short port, int max_connect);
 
 #endif
