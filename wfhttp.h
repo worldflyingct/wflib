@@ -18,13 +18,16 @@ enum HTTPVERSION {
 
 typedef struct HTTPPARAM {
     unsigned char *key;
+    unsigned int key_len;
     unsigned char *value;
+    unsigned int value_len;
 } HTTPPARAM;
 
 unsigned int ParseHttpHeader (unsigned char* str,
                                 unsigned int str_size,
                                 enum HTTPMETHOD *method,
-                                unsigned char* path,
+                                unsigned char **path,
+                                unsigned int *path_len,
                                 enum HTTPVERSION *version,
                                 HTTPPARAM *httpparam,
                                 unsigned int httpparam_size);

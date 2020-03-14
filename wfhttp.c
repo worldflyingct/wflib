@@ -15,7 +15,8 @@ enum STATUS {
 unsigned int ParseHttpHeader (unsigned char* str,
                                 unsigned int str_size,
                                 enum HTTPMETHOD *method,
-                                unsigned char* path,
+                                unsigned char **path,
+                                unsigned int *path_len,
                                 enum HTTPVERSION *version,
                                 HTTPPARAM *httpparam,
                                 unsigned int httpparam_size) {
@@ -42,11 +43,12 @@ unsigned int ParseHttpHeader (unsigned char* str,
                     }
                     status = PATH;
                     offset = i + 1;
-                    path = str + offset;
+                    *path = str + offset;
                 }
                 break;
             case PATH:
                 if (str[i] == ' ') {
+                    *path_len = i - offset;
                     str[i] = '\0';
                     offset = i + 1;
                     status = VERSION;
@@ -64,7 +66,6 @@ unsigned int ParseHttpHeader (unsigned char* str,
                         printf("http version is unknown\n");
                         return -2;
                     }
-                    str[i] = '\0';
                     i++;
                     offset = i + 1;
                     paramid = 0;
@@ -77,17 +78,20 @@ unsigned int ParseHttpHeader (unsigned char* str,
                 break;
             case PARAMKEY:
                 if (str[i] == ':') {
+                    httpparam[paramid].key_len = i - offset;
                     str[i] = '\0';
                     offset = i + 1;
                     httpparam[paramid].value = str + offset;
                     status = PARAMVALUE;
                 } else if (str[i] == '\r' && str[i+1] == '\n') {
+                    httpparam[paramid].value_len = i - offset;
                     offset = i + 2;
                     return offset;
                 }
                 break;
             case PARAMVALUE:
                 if (str[i] == '\r' && str[i+1] == '\n') {
+                    httpparam[paramid].value_len = i - offset;
                     str[i] = '\0';
                     i++;
                     offset = i + 1;
@@ -98,6 +102,9 @@ unsigned int ParseHttpHeader (unsigned char* str,
                     }
                     httpparam[paramid].key = str + offset;
                     status = PARAMKEY;
+                } else if (str[i] == ' ') {
+                    offset++;
+                    httpparam[paramid].value = str + offset;
                 }
                 break;
         }

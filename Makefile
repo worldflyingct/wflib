@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-std=gnu99 -O3 -static
 
-wsserver: main.o wfws.o wfasyncio.o wfhttp.o
+wsserver: main.o wfws.o wfasyncio.o wfhttp.o sha1.o base64.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 main.o: main.c wfws.h wfasyncio.h
@@ -15,6 +15,12 @@ wfasyncio.o: wfasyncio.c wfasyncio.h
 
 wfhttp.o: wfhttp.c wfhttp.h
 	$(CC) $(CFLAGS) -c -o $@ wfhttp.c
+
+sha1.o: sha1.c
+	$(CC) $(CFLAGS) -c -o $@ sha1.c
+
+base64.o: base64.c
+	$(CC) $(CFLAGS) -c -o $@ base64.c
 
 clean:
 	rm *.o
