@@ -61,7 +61,6 @@ int Read_Ws_Socket (WF_NIO *asyncio, int fd, void *ptr) {
         }
         if (k == -1) {
             readbuf[len-1] = '\0';
-            printf("readbuf:%s, in %s, at %d\n", readbuf,  __FILE__, __LINE__);fflush(stdout);
             Wf_Nio_Error_Ws(asyncio, fd, ptr, 0);
             return -2;
         }
