@@ -64,13 +64,13 @@ unsigned int ParseHttpHeader (unsigned char* str,
                         *version = HTTP2_0;
                     } else {
                         printf("http version is unknown\n");
-                        return -2;
+                        return -1;
                     }
                     i++;
                     offset = i + 1;
                     paramid = 0;
                     if (paramid >= httpparam_size) {
-                        return -3;
+                        return -1;
                     }
                     httpparam[paramid].key = str + offset;
                     status = PARAMKEY;
@@ -97,7 +97,7 @@ unsigned int ParseHttpHeader (unsigned char* str,
                     offset = i + 1;
                     paramid++;
                     if (paramid >= httpparam_size) {
-                        return -4;
+                        return -1;
                         break;
                     }
                     httpparam[paramid].key = str + offset;
@@ -109,5 +109,5 @@ unsigned int ParseHttpHeader (unsigned char* str,
                 break;
         }
     }
-    return 0;
+    return -1;
 }
