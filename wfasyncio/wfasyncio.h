@@ -16,7 +16,7 @@ int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, W
 int Wf_Del_Epoll_Fd (WF_NIO *asyncio);
 int Wf_Run_Event ();
 int Change_Socket_Opt (int fd, int keepalive, int keepidle, int keepintvl, int keepcnt);
+int Wf_Nio_Read_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size);
 int Wf_Nio_Write_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size);
-
 
 #endif

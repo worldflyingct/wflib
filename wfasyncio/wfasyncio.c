@@ -135,6 +135,10 @@ int Wf_Del_Epoll_Fd (WF_NIO *asyncio) {
     return 0;
 }
 
+int Wf_Nio_Read_fd (WF_NIO *asyncio, unsigned char* data, unsigned int size) {
+    return read(asyncio->fd, data, size);
+}
+
 int Wf_Nio_Write_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size) {
     if (asyncio->canwrite) {
         ssize_t len = write(asyncio->fd, data, size);
