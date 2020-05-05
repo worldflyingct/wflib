@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -148,9 +149,9 @@ int Send_Ws_Data (WFWS *wfws, unsigned char *data, unsigned long datasize, WS_DA
     return 0;
 }
 
-void Wf_Ws_Coroutine (WF_CTX *wf_ctx, CORO_STATUS status, void *ptr) {
+void Wf_Ws_Coroutine (WF_CTX *wf_ctx, void *ptr) {
     WFWS *wfws = ptr;
-    if (status == ERROR) {
+    if (wf_ctx->status == ERROR) {
         printf("ws coroutine err, in %s, at %d\n", __FILE__, __LINE__);
         Wf_Nio_Error_Ws(wfws, 0);
         return;
@@ -212,20 +213,23 @@ void Wf_Ws_Coroutine (WF_CTX *wf_ctx, CORO_STATUS status, void *ptr) {
     if (Coroutine_WriteData (wf_ctx, s, response_len)) {
         printf("in %s, at %d\n", __FILE__, __LINE__);
         Wf_Nio_Error_Ws(wfws, 0);
+        return;
     }
     wfws->ctx = wf_ctx;
     wfws->newfn(wfws, wfws->ptr);
     while (1) {
         Suspend_Coroutine(wf_ctx);
-        if (status == ERROR) {
+        if (wf_ctx->status == ERROR) {
             printf("ws coroutine err, in %s, at %d\n", __FILE__, __LINE__);
             Wf_Nio_Error_Ws(wfws, 0);
+            return;
         }
         if ((len = Coroutine_ReadData(wf_ctx, readbuf, sizeof(readbuf))) < 0) {
             if (errno != 11) {
                 perror("ws socket register read err");
                 printf("in %s, at %d\n",  __FILE__, __LINE__);
                 Wf_Nio_Error_Ws(wfws, 0);
+                return;
             }
             continue;
         }
@@ -237,6 +241,7 @@ void Wf_Ws_Coroutine (WF_CTX *wf_ctx, CORO_STATUS status, void *ptr) {
                     unsigned long datasize;
                     if (!(datasize = Parse_Ws_Data(readbuf, len, &data)) == -1) {
                         Wf_Nio_Error_Ws(wfws, 0);
+                        return;
                     }
                     data[datasize] = '\0';
                     wfws->receivefn(wfws, data, datasize, TEXT, wfws->ptr);
@@ -245,10 +250,12 @@ void Wf_Ws_Coroutine (WF_CTX *wf_ctx, CORO_STATUS status, void *ptr) {
                     unsigned long datasize;
                     if ((datasize = Parse_Ws_Data(readbuf, len, &data)) == -1) {
                         Wf_Nio_Error_Ws(wfws, 0);
+                        return;
                     }
                     wfws->receivefn(wfws, data, datasize, BLOB, wfws->ptr);
                 } else if (opcode == 0x08) { // 断开帧
                     Wf_Nio_Error_Ws(wfws, 0);
+                    return;
                 }
             } else { // 连续帧的最后一帧
             }
@@ -267,7 +274,7 @@ int Accept_Ws_Socket (WF_NIO *asyncio, int listenfd, void *ptr) {
         printf("in %s, at %d\n", __FILE__, __LINE__);
         return -1;
     }
-    if (Change_Socket_Opt (fd, 0, 0, 0, 0)) {
+    if (Wf_SET_NIO (fd) || Change_Socket_Opt (fd, 0, 0, 0, 0)) {
         printf("in %s, at %d", __FILE__, __LINE__);
         close(fd);
         return -2;
@@ -293,7 +300,7 @@ int Accept_Ws_Socket (WF_NIO *asyncio, int listenfd, void *ptr) {
         close(fd);
         wfws->ptr = client_remainhead;
         client_remainhead = wfws;
-        return -3;
+        return -4;
     }
     return 0;
 }
@@ -337,7 +344,7 @@ int Wf_Nio_Create_Ws_Server (unsigned short port, int max_connect, Wf_Ws_Server_
     wfwsserver->receivefn = receivefn;
     wfwsserver->losefn = losefn;
     wfwsserver->ptr = ptr;
-    if (Wf_Add_Epoll_Fd(fd, Accept_Ws_Socket, NULL, NULL, wfwsserver)) {
+    if (Wf_SET_NIO(fd) || Wf_Add_Epoll_Fd(fd, Accept_Ws_Socket, NULL, NULL, wfwsserver)) {
         printf("Wf_Add_Epoll_Fd fail, fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
         close(fd);
         return -4;

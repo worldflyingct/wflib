@@ -8,6 +8,8 @@
 #include <netdb.h>
 #include "wfasyncio.h"
 
+#define MAXDATASIZE   2*1024*1024
+
 struct WF_NIO {
     int fd;
     Wf_Nio_ReadFunc readfn; // 遇到可写事件时触发的回调函数
@@ -38,19 +40,8 @@ int Init_Wf_Nio_Io () {
 }
 
 int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn, void *ptr) {
-    int fdflags = fcntl(fd, F_GETFL, 0);
-    if (fdflags < 0) {
-        perror("get fd flags fail");
-        printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
-        return -1;
-    }
-    if (fcntl(fd, F_SETFL, fdflags | O_NONBLOCK) < 0) {
-        perror("set fd flags fail");
-        printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
-        return -2;
-    }
     struct epoll_event ev;
-    uint32_t flags = EPOLLOUT;
+    uint32_t flags = 0;
     if (readfn) {
         flags |= EPOLLIN;
     }
@@ -66,7 +57,7 @@ int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, W
         if ((asyncio =  (WF_NIO*)malloc(sizeof (WF_NIO))) == NULL) {
             perror("malloc new WF_NIO obj fail");
             printf("in %s, at %d\n", __FILE__, __LINE__);
-            return -4;
+            return -1;
         }
         asyncio->data = NULL;
         asyncio->fullsize = 0;
@@ -88,7 +79,7 @@ int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, W
         printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
         asyncio->ptr = remainhead;
         remainhead = asyncio;
-        return -5;
+        return -2;
     }
     asyncio->watch = 1;
     return 0;
@@ -96,7 +87,7 @@ int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, W
 
 int Wf_Mod_Epoll_Fd (WF_NIO *asyncio, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn, void *ptr) {
     struct epoll_event ev;
-    uint32_t flags = EPOLLOUT;
+    uint32_t flags = 0;
     if (readfn) {
         flags |= EPOLLIN;
     }
@@ -123,6 +114,9 @@ int Wf_Mod_Epoll_Fd (WF_NIO *asyncio, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc w
 }
 
 int Wf_Del_Epoll_Fd (WF_NIO *asyncio) {
+    if (asyncio == NULL) {
+        return -1;
+    }
     if (asyncio->watch && epoll_ctl(epollfd, EPOLL_CTL_DEL, asyncio->fd, NULL)) {
         perror("epoll ctl del fail");
         printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
@@ -316,6 +310,21 @@ int Change_Socket_Opt (int fd, int keepalive, int keepidle, int keepintvl, int k
     // printf("new receive buffer is %d, fd:%d\n", socksval, fd);
 }
 
+int Wf_SET_NIO (int fd) {
+    int fdflags = fcntl(fd, F_GETFL, 0);
+    if (fdflags < 0) {
+        perror("get fd flags fail");
+        printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
+        return -1;
+    }
+    if (fcntl(fd, F_SETFL, fdflags | O_NONBLOCK) < 0) {
+        perror("set fd flags fail");
+        printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
+        return -2;
+    }
+    return 0;
+}
+
 int Wf_Run_Event (int maxevents) {
     if (epollfd == 0) {
         printf("you need call Init_Wf_Nio_Io firstly, in %s, at %d\n", __FILE__, __LINE__);
@@ -331,6 +340,9 @@ LOOP:
     wait_count = epoll_wait(epollfd, evs, maxevents, -1);
     for (int i = 0 ; i < wait_count ; i++) {
         WF_NIO *asyncio = evs[i].data.ptr;
+        if (!asyncio->watch) {
+            continue;
+        }
         uint32_t events = evs[i].events;
         if (events & ~(EPOLLIN | EPOLLOUT)) { // 除了独写外，还有别的事件
             asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, events);
