@@ -10,11 +10,12 @@
 
 struct WF_NIO {
     int fd;
-    Wf_Nio_ReadFunc readfn; // 遇到可写事件时触发的回调函数
-    Wf_Nio_WriteFunc writefn; // 遇到可写事件时触发的回调函数
-    Wf_Nio_ErrorFunc errorfn; // 遇到可写事件时触发的回调函数
-    int watch;
-    int canwrite;
+    Wf_Nio_AcceptFunc acceptfn;
+    Wf_Nio_ReadFunc readfn;
+    Wf_Nio_WriteFunc writefn;
+    Wf_Nio_ErrorFunc errorfn;
+    int readmode;
+    int epollflags;
     unsigned char *data;
     int usesize;
     int fullsize;
@@ -37,7 +38,7 @@ int Init_Wf_Nio_Io () {
     return 0;
 }
 
-int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn, void *ptr) {
+int Set_Nio (int fd) {
     int fdflags = fcntl(fd, F_GETFL, 0);
     if (fdflags < 0) {
         perror("get fd flags fail");
@@ -48,190 +49,6 @@ int Wf_Add_Epoll_Fd (int fd, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, W
         perror("set fd flags fail");
         printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
         return -2;
-    }
-    struct epoll_event ev;
-    uint32_t flags = EPOLLOUT;
-    if (readfn) {
-        flags |= EPOLLIN;
-    }
-    if (writefn) {
-        flags |= EPOLLOUT;
-    }
-    if (errorfn) {
-        flags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-    }
-    ev.events = flags;
-    WF_NIO *asyncio;
-    if (remainhead == NULL) {
-        if ((asyncio =  (WF_NIO*)malloc(sizeof (WF_NIO))) == NULL) {
-            perror("malloc new WF_NIO obj fail");
-            printf("in %s, at %d\n", __FILE__, __LINE__);
-            return -4;
-        }
-        asyncio->data = NULL;
-        asyncio->fullsize = 0;
-    } else {
-        asyncio = remainhead;
-        remainhead = remainhead->ptr;
-    }
-    asyncio->fd = fd;
-    asyncio->readfn = readfn;
-    asyncio->writefn = writefn;
-    asyncio->errorfn = errorfn;
-    asyncio->watch = 0;
-    asyncio->canwrite = writefn ? 0 : 1; // 如果不监听可写事件就默认可写，如果监听可写事件就默认不可写
-    asyncio->usesize = 0;
-    asyncio->ptr = ptr;
-    ev.data.ptr = asyncio;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev)) {
-        perror("epoll ctl add fail");
-        printf("fd:%d, in %s, at %d\n", fd, __FILE__, __LINE__);
-        asyncio->ptr = remainhead;
-        remainhead = asyncio;
-        return -5;
-    }
-    asyncio->watch = 1;
-    return 0;
-}
-
-int Wf_Mod_Epoll_Fd (WF_NIO *asyncio, Wf_Nio_ReadFunc readfn, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn, void *ptr) {
-    struct epoll_event ev;
-    uint32_t flags = EPOLLOUT;
-    if (readfn) {
-        flags |= EPOLLIN;
-    }
-    if (writefn) {
-        flags |= EPOLLOUT;
-    }
-    if (errorfn) {
-        flags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-    }
-    ev.events = flags;
-    asyncio->readfn = readfn;
-    asyncio->writefn = writefn;
-    asyncio->errorfn = errorfn;
-    asyncio->ptr = ptr;
-    ev.data.ptr = asyncio;
-    if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
-        perror("epoll ctl add fail");
-        printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
-        asyncio->ptr = remainhead;
-        remainhead = asyncio;
-        return -1;
-    }
-    return 0;
-}
-
-int Wf_Del_Epoll_Fd (WF_NIO *asyncio) {
-    if (asyncio->watch && epoll_ctl(epollfd, EPOLL_CTL_DEL, asyncio->fd, NULL)) {
-        perror("epoll ctl del fail");
-        printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
-        return -1;
-    }
-    close(asyncio->fd);
-    asyncio->watch = 0;
-    asyncio->ptr = remainhead;
-    remainhead = asyncio;
-    return 0;
-}
-
-int Wf_Nio_Write_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size) {
-    if (asyncio->canwrite) {
-        ssize_t len = write(asyncio->fd, data, size);
-        if (len < size) {
-            printf("in %s, at %d\n",  __FILE__, __LINE__);
-            if (len < 0) {
-                if (errno != 11) {
-                    perror("write error");
-                    printf("fd:%d, errno:%d, in %s, at %d\n", asyncio->fd, errno,  __FILE__, __LINE__);
-                }
-                return -1;
-            }
-            int remainsize = size - len;
-            if (asyncio->fullsize < remainsize) {
-                if (asyncio->data) {
-                    free(asyncio->data);
-                }
-                unsigned char *tmpdata;
-                if ((tmpdata = (unsigned char*)malloc(remainsize)) == NULL) {
-                    perror("malloc fail");
-                    printf("remainsize:%d, in %s, at %d\n", remainsize,  __FILE__, __LINE__);
-                    return -2;
-                }
-                asyncio->data = tmpdata;
-            }
-            memcpy(asyncio->data, data + len, remainsize);
-            asyncio->usesize = remainsize;
-            asyncio->canwrite = 0;
-            struct epoll_event ev;
-            uint32_t flags = EPOLLOUT;
-            if (asyncio->readfn) {
-                flags |= EPOLLIN;
-            }
-            if (asyncio->errorfn) {
-                flags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-            }
-            ev.events = flags;
-            ev.data.ptr = asyncio;
-            if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
-                perror("epoll ctl mod fail");
-                printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
-                return -3;
-            }
-        }
-    } else {
-        int remainsize = asyncio->usesize + size;
-        if (asyncio->fullsize < remainsize) {
-            if (asyncio->data) {
-                free(asyncio->data);
-            }
-            unsigned char *tmpdata;
-            if ((tmpdata = (unsigned char*)malloc(remainsize)) == NULL) {
-                perror("malloc fail");
-                printf("remainsize:%d, in %s, at %d\n", remainsize,  __FILE__, __LINE__);
-                return -4;
-            }
-            asyncio->data = tmpdata;
-        }
-        memcpy(asyncio->data + asyncio->usesize, data, size);
-        asyncio->usesize = remainsize;
-    }
-    return 0;
-}
-
-int Wf_Write_Node (WF_NIO *asyncio) {
-    ssize_t len = write(asyncio->fd, asyncio->data, asyncio->usesize);
-    if (len < asyncio->usesize) {
-        if (len < 0) {
-            if (errno != 11) {
-                perror("write error");
-                printf("fd:%d, errno:%d, in %s, at %d\n", asyncio->fd, errno,  __FILE__, __LINE__);
-            }
-            return -1;
-        }
-        int remainsize = asyncio->usesize - len;
-        for (int i = 0 ; i < remainsize ; i++) {
-            asyncio->data[i] = asyncio->data[i+len];
-        }
-        asyncio->usesize = remainsize;
-    } else {
-        asyncio->usesize = 0;
-        asyncio->canwrite = 1;
-        struct epoll_event ev;
-        uint32_t flags = 0;
-        if (asyncio->readfn) {
-            flags |= EPOLLIN;
-        }
-        if (asyncio->errorfn) {
-            flags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-        }
-        ev.events = flags;
-        ev.data.ptr = asyncio;
-        if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
-            perror("epoll ctl mod fail");
-            printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
-            return -2;
-        }
     }
     return 0;
 }
@@ -310,6 +127,326 @@ int Change_Socket_Opt (int fd, int keepalive, int keepidle, int keepintvl, int k
         return -11;
     }
     // printf("new receive buffer is %d, fd:%d\n", socksval, fd);
+    return 0;
+}
+
+int Wf_Del_All_Listen (WF_NIO *asyncio) {
+    if (asyncio->epollflags) {
+        if (epoll_ctl(epollfd, EPOLL_CTL_DEL, asyncio->fd, NULL)) {
+            perror("epoll ctl del fail");
+            printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+            return -1;
+        }
+        asyncio->epollflags = 0;
+        asyncio->acceptfn = NULL;
+        asyncio->readfn = NULL;
+        asyncio->writefn = NULL;
+        asyncio->errorfn = NULL;
+    }
+    return 0;
+}
+
+int Wf_Del_Read_Listen (WF_NIO *asyncio) {
+    if (asyncio->epollflags | EPOLLIN) {
+        if (asyncio->epollflags | EPOLLOUT) { // 存在有写或接收监听
+            int oldflags = asyncio->epollflags;
+            oldflags &= ~EPOLLIN;
+            struct epoll_event ev;
+            ev.events = oldflags;
+            ev.data.ptr = asyncio;
+            if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
+                perror("epoll ctl mod fail");
+                printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+                return -1;
+            }
+            asyncio->epollflags = oldflags;
+            asyncio->acceptfn = NULL;
+            asyncio->readfn = NULL;
+        } else if (Wf_Del_All_Listen(asyncio)) {
+            return -2;
+        }
+    }
+    return 0;
+}
+
+int Wf_Del_Write_Listen (WF_NIO *asyncio) {
+    if (asyncio->epollflags | EPOLLOUT) {
+        if (asyncio->epollflags | EPOLLIN) { // 存在有读监听
+            int oldflags = asyncio->epollflags;
+            oldflags &= ~EPOLLOUT;
+            struct epoll_event ev;
+            ev.events = oldflags;
+            ev.data.ptr = asyncio;
+            if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
+                perror("epoll ctl mod fail");
+                printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+                return -1;
+            }
+            asyncio->epollflags = oldflags;
+            asyncio->writefn = NULL;
+        } else if (Wf_Del_All_Listen(asyncio)) {
+            return -2;
+        }
+    }
+    return 0;
+}
+
+int Wf_Del_Epoll_Fd (WF_NIO *asyncio) {
+    Wf_Del_All_Listen(asyncio);
+    asyncio->ptr = remainhead;
+    remainhead = asyncio;
+}
+
+WF_NIO *Wf_Add_Epoll_Fd (int fd, void *ptr) {
+    if (Set_Nio(fd)) {
+        perror("malloc new WF_NIO obj fail");
+        printf("in %s, at %d\n", __FILE__, __LINE__);
+        return NULL;
+    }
+    WF_NIO *asyncio;
+    if (remainhead == NULL) {
+        if ((asyncio =  (WF_NIO*)malloc(sizeof (WF_NIO))) == NULL) {
+            perror("malloc new WF_NIO obj fail");
+            printf("in %s, at %d\n", __FILE__, __LINE__);
+            return NULL;
+        }
+        asyncio->data = NULL;
+        asyncio->fullsize = 0;
+    } else {
+        asyncio = remainhead;
+        remainhead = remainhead->ptr;
+    }
+    asyncio->fd = fd;
+    asyncio->epollflags = 0;
+    asyncio->acceptfn = NULL;
+    asyncio->readfn = NULL;
+    asyncio->writefn = NULL;
+    asyncio->errorfn = NULL;
+    asyncio->usesize = 0;
+    asyncio->ptr = ptr;
+    return asyncio;
+}
+
+int Wf_Nio_Listen_Port (unsigned short port, int max_connect) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        perror("create socket fail");
+        printf("in %s, at %d\n", __FILE__, __LINE__);
+        return -1;
+    }
+    struct sockaddr_in sin;
+    memset(&sin, 0, sizeof(struct sockaddr_in));
+    sin.sin_family = AF_INET; // ipv4
+    sin.sin_addr.s_addr = INADDR_ANY; // 本机任意ip
+    sin.sin_port = htons(port);
+    if (bind(fd, (struct sockaddr*)&sin, sizeof(sin)) < 0) {
+        perror("bind port error");
+        printf("port %d is cann't use, in %s, at %d\n", port, __FILE__, __LINE__);
+        close(fd);
+        return -2;
+    }
+    if (listen(fd, max_connect) < 0) {
+        perror("bind port error");
+        printf("listen port %d fail, in %s, at %d\n", port, __FILE__, __LINE__);
+        close(fd);
+        return -3;
+    }
+    return fd;
+}
+
+int Wf_Nio_Accept_fd (WF_NIO *asyncio, Wf_Nio_AcceptFunc acceptfn, Wf_Nio_ErrorFunc errorfn) {
+    struct epoll_event ev;
+    int oldflags = asyncio->epollflags;
+    asyncio->epollflags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLIN;
+    asyncio->acceptfn = acceptfn;
+    asyncio->readmode = 1;
+    asyncio->errorfn = errorfn;
+    ev.events = asyncio->epollflags;
+    ev.data.ptr = asyncio;
+    if (epoll_ctl(epollfd, oldflags ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, asyncio->fd, &ev)) {
+        perror("epoll ctl mod fail");
+        printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+        return -1;
+    }
+}
+
+int Wf_Nio_Read_fd (WF_NIO *asyncio, Wf_Nio_ReadFunc readfn, Wf_Nio_ErrorFunc errorfn) {
+    struct epoll_event ev;
+    int oldflags = asyncio->epollflags;
+    asyncio->epollflags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLIN;
+    asyncio->readfn = readfn;
+    asyncio->readmode = 0;
+    asyncio->errorfn = errorfn;
+    ev.events = asyncio->epollflags;
+    ev.data.ptr = asyncio;
+    if (epoll_ctl(epollfd, oldflags ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, asyncio->fd, &ev)) {
+        perror("epoll ctl mod fail");
+        printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+        return -1;
+    }
+    return 0;
+}
+
+int Wf_Nio_Write_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn) {
+    if (asyncio->epollflags | EPOLLOUT) {
+        int remainsize = asyncio->usesize + size;
+        if (asyncio->fullsize < remainsize) {
+            unsigned char *tmpdata = (unsigned char*)malloc(remainsize);
+            if (tmpdata == NULL) {
+                perror("malloc fail");
+                printf("remainsize:%d, in %s, at %d\n", remainsize,  __FILE__, __LINE__);
+                return -1;
+            }
+            if (asyncio->usesize) {
+                memcpy(tmpdata, asyncio->data, asyncio->usesize);
+                free(asyncio->data);
+            }
+            asyncio->data = tmpdata;
+            asyncio->fullsize = remainsize;
+        }
+        memcpy(asyncio->data + asyncio->usesize, data, size);
+        asyncio->usesize = remainsize;
+        if (asyncio->writefn != writefn) {
+            if (asyncio->writefn) {
+                printf("warning, write finish callback function changed, in %s, at %d\n",  __FILE__, __LINE__);
+            }
+            asyncio->writefn = writefn; // 替换写入完成回调。
+        }
+        if (asyncio->errorfn != errorfn) {
+            if (asyncio->errorfn) {
+                printf("warning, error finish callback function changed, in %s, at %d\n",  __FILE__, __LINE__);
+            }
+            asyncio->errorfn = errorfn; // 替换写入完成回调。
+        }
+    } else {
+        ssize_t len = write(asyncio->fd, data, size);
+        if (len == size) {
+            if (writefn) {
+                writefn(asyncio, asyncio->fd, asyncio->ptr);
+            }
+        } else if (len < 0) {
+            if (errno != EAGAIN) {
+                perror("write error");
+                printf("fd:%d, errno:%d, in %s, at %d\n", asyncio->fd, errno,  __FILE__, __LINE__);
+                return -2;
+            }
+            if (asyncio->fullsize < size) {
+                unsigned char *tmpdata = (unsigned char*)malloc(size);
+                if (tmpdata == NULL) {
+                    perror("malloc fail");
+                    printf("remainsize:%d, in %s, at %d\n", size,  __FILE__, __LINE__);
+                    return -3;
+                }
+                if (asyncio->usesize) {
+                    memcpy(tmpdata, asyncio->data, asyncio->usesize);
+                    free(asyncio->data);
+                }
+                asyncio->data = tmpdata;
+                asyncio->fullsize = size;
+            }
+            memcpy(asyncio->data + asyncio->usesize, data, size);
+            asyncio->usesize = size;
+            struct epoll_event ev;
+            int oldflags = asyncio->epollflags;
+            asyncio->epollflags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLOUT;
+            asyncio->writefn = writefn;
+            asyncio->errorfn = errorfn;
+            ev.events = asyncio->epollflags;
+            ev.data.ptr = asyncio;
+            if (epoll_ctl(epollfd, oldflags ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, asyncio->fd, &ev)) {
+                perror("epoll ctl mod fail");
+                printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+                return -4;
+            }
+        } else if (len < size) {
+            printf("in %s, at %d\n",  __FILE__, __LINE__);
+            int remainsize = size - len;
+            if (asyncio->fullsize < remainsize) {
+                unsigned char *tmpdata = (unsigned char*)malloc(remainsize);
+                if (tmpdata == NULL) {
+                    perror("malloc fail");
+                    printf("remainsize:%d, in %s, at %d\n", remainsize,  __FILE__, __LINE__);
+                    return -5;
+                }
+                if (asyncio->usesize) {
+                    memcpy(tmpdata, asyncio->data, asyncio->usesize);
+                    free(asyncio->data);
+                }
+                asyncio->data = tmpdata;
+                asyncio->fullsize = remainsize;
+            }
+            memcpy(asyncio->data, data + len, remainsize);
+            asyncio->usesize = remainsize;
+            struct epoll_event ev;
+            int oldflags = asyncio->epollflags;
+            asyncio->epollflags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP | EPOLLOUT;
+            asyncio->writefn = writefn;
+            asyncio->errorfn = errorfn;
+            ev.events = asyncio->epollflags;
+            ev.data.ptr = asyncio;
+            if (epoll_ctl(epollfd, oldflags ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, asyncio->fd, &ev)) {
+                perror("epoll ctl mod fail");
+                printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
+                return -6;
+            }
+        }
+    }
+    return 0;
+}
+
+int Wf_READ_Node (WF_NIO *asyncio) {
+    if (asyncio->readmode) {
+        static unsigned char data[MAXDATASIZE];
+        ssize_t len = read(asyncio->fd, data, MAXDATASIZE);
+        if (len >= 0) {
+            asyncio->readfn(asyncio, asyncio->fd, asyncio->ptr, data, len);
+        } else if (len < 0 && errno != EAGAIN) {
+            perror("write error");
+            printf("fd:%d, errno:%d, in %s, at %d\n", asyncio->fd, errno,  __FILE__, __LINE__);
+            if (asyncio->errorfn) {
+                asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, 0);
+            }
+            return -1;
+        }
+    } else {
+        struct sockaddr_in sin;
+        socklen_t in_addr_len = sizeof(struct sockaddr_in);
+        int newfd;
+        if ((newfd = accept(asyncio->fd, (struct sockaddr*)&sin, &in_addr_len)) < 0) {
+            perror("accept a new fd fail");
+            printf("in %s, at %d\n", __FILE__, __LINE__);
+            return -2;
+        }
+        if (Change_Socket_Opt(newfd, 1, 30, 3, 1)) {
+            printf("in %s, at %d", __FILE__, __LINE__);
+            close(newfd);
+            return -3;
+        }
+        asyncio->acceptfn(asyncio, asyncio->fd, asyncio->ptr, newfd);
+    }
+    return 0;
+}
+
+int Wf_Write_Node (WF_NIO *asyncio) {
+    ssize_t len = write(asyncio->fd, asyncio->data, asyncio->usesize);
+    if (len == asyncio->usesize) {
+        asyncio->usesize = 0;
+        if (asyncio->writefn) {
+            asyncio->writefn(asyncio, asyncio->fd, asyncio->ptr);
+        }
+    } else if (len < 0 && errno != EAGAIN) {
+        perror("write error");
+        printf("fd:%d, errno:%d, in %s, at %d\n", asyncio->fd, errno,  __FILE__, __LINE__);
+        if (asyncio->errorfn) {
+            asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, 0);
+        }
+        return -1;
+    } else if (len < asyncio->usesize) {
+        int remainsize = asyncio->usesize - len;
+        memcpy(asyncio->data, asyncio->data+len, remainsize);
+        asyncio->usesize = remainsize;
+    }
+    return 0;
 }
 
 int Wf_Run_Event (int maxevents) {
@@ -328,39 +465,18 @@ LOOP:
     for (int i = 0 ; i < wait_count ; i++) {
         WF_NIO *asyncio = evs[i].data.ptr;
         uint32_t events = evs[i].events;
-        if (events & ~(EPOLLIN | EPOLLOUT)) { // 除了独写外，还有别的事件
-            asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, events);
+        if (!asyncio->epollflags) {
+            ;
+        } else if (events & ~(EPOLLIN | EPOLLOUT)) { // 除了读写外，还有别的事件
+            if (asyncio->errorfn) {
+                asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, events);
+            } else { // 处理错误的默认方法
+                Wf_Del_Epoll_Fd(asyncio);
+            }
         } else if (events & EPOLLIN) {
-            asyncio->readfn(asyncio, asyncio->fd, asyncio->ptr);
+            Wf_READ_Node(asyncio);
         } else if (events & EPOLLOUT) {
-            if (asyncio->usesize) {
-                if (Wf_Write_Node(asyncio) < 0 && asyncio->errorfn) {
-                    asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, events);
-                }
-            } else {
-                asyncio->canwrite = 1;
-                struct epoll_event ev;
-                uint32_t flags = 0;
-                if (asyncio->readfn) {
-                    flags |= EPOLLIN;
-                }
-                if (asyncio->errorfn) {
-                    flags |= EPOLLERR | EPOLLHUP | EPOLLRDHUP;
-                }
-                ev.events = flags;
-                ev.data.ptr = asyncio;
-                if (epoll_ctl(epollfd, EPOLL_CTL_MOD, asyncio->fd, &ev)) {
-                    perror("epoll ctl mod fail");
-                    printf("fd:%d, in %s, at %d\n", asyncio->fd, __FILE__, __LINE__);
-                    if (asyncio->errorfn) {
-                        asyncio->errorfn(asyncio, asyncio->fd, asyncio->ptr, events);
-                    }
-                }
-            }
-            if (asyncio->writefn) {
-                asyncio->writefn(asyncio, asyncio->fd, asyncio->ptr);
-                asyncio->writefn = NULL;
-            }
+            Wf_Write_Node(asyncio);
         }
     }
     goto LOOP;

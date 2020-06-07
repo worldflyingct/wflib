@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include "wfasyncio/wfasyncio.h"
-#include "wfws/wfws.h"
+#include "wfhttp/wfhttp.h"
 
+/*
 int ws_new_client (WFWS *wfws, void *ptr) {
     printf("have a new client, in %s, at %d\n", __FILE__, __LINE__);
 }
@@ -17,11 +18,22 @@ int ws_receive_client (WFWS *wfws, unsigned char *data, unsigned long size, WS_D
 
 int ws_lose_client (WFWS *wfws, void *ptr) {
 }
+*/
+
+int http_required_handle (WFHTTP *wfhttp, int fd, void* ptr, unsigned char *body, unsigned int body_size, enum HTTPMETHOD httpmethod, unsigned char *path, unsigned int path_len, enum HTTPVERSION version, HTTPPARAM *httpparam, unsigned int httpparam_size) {
+    printf("hello world, in %s, at %d\n", __FILE__, __LINE__);
+}
 
 int main () {
     Init_Wf_Nio_Io();
+/*
     if (Wf_Nio_Create_Ws_Server(3888, 51200, ws_new_client, ws_receive_client, ws_lose_client, NULL)) {
         return -1;
     }
+*/
+    if (Wf_Nio_Create_Http_Server(8080, 51200, http_required_handle, NULL)) {
+        return -1;
+    }
     Wf_Run_Event(8192);
+    return 0;
 }
