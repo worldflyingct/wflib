@@ -20,10 +20,10 @@ int Wf_Del_Read_Listen (WF_NIO *asyncio);
 int Wf_Del_All_Listen (WF_NIO *asyncio);
 int Wf_Nio_Write_fd (WF_NIO *asyncio, unsigned char *data, unsigned int size, Wf_Nio_WriteFunc writefn, Wf_Nio_ErrorFunc errorfn);
 int Wf_Nio_Read_fd (WF_NIO *asyncio, Wf_Nio_ReadFunc readfn, Wf_Nio_ErrorFunc errorfn);
-int Wf_Nio_Accept_fd (WF_NIO *asyncio, Wf_Nio_AcceptFunc acceptfn, Wf_Nio_ErrorFunc errorfn);
+int Wf_Nio_Accept_fd (unsigned int port, int max_connect, Wf_Nio_AcceptFunc acceptfn, Wf_Nio_ErrorFunc errorfn, void* ptr);
 int Set_Nio (int fd);
 int Wf_Run_Event ();
-int Wf_Nio_Listen_Port (unsigned short port, int max_connect);
+int Wf_Listen_Socket (unsigned short port, int max_connect);
 int Change_Socket_Opt (int fd, int keepalive, int keepidle, int keepintvl, int keepcnt);
 
 #endif

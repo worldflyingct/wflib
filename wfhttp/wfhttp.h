@@ -35,8 +35,7 @@ unsigned int ParseHttpHeader (unsigned char* str,
                                 enum HTTPVERSION *version,
                                 HTTPPARAM *httpparam,
                                 unsigned int *httpparam_size);
-int Receive_Http_Data (WF_NIO *asyncio, int fd, void *ptr, void* data, unsigned int size);
-int Accept_Http_Socket (WF_NIO *asyncio, int fd, void *ptr, int newfd);
+int Http_End (WFHTTP* wfhttp, unsigned char *data, unsigned int size);
 int Wf_Nio_Create_Http_Server (unsigned short port, int max_connect, Wf_Http_Required_Handle requirehandle, void *ptr);
 
 #endif

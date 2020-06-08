@@ -21,7 +21,11 @@ int ws_lose_client (WFWS *wfws, void *ptr) {
 */
 
 int http_required_handle (WFHTTP *wfhttp, int fd, void* ptr, unsigned char *body, unsigned int body_size, enum HTTPMETHOD httpmethod, unsigned char *path, unsigned int path_len, enum HTTPVERSION version, HTTPPARAM *httpparam, unsigned int httpparam_size) {
-    printf("hello world, in %s, at %d\n", __FILE__, __LINE__);
+    printf("path:%s, in %s, at %d\n", path, __FILE__, __LINE__);
+    for (unsigned int i = 0 ; i < httpparam_size ; i++) {
+        printf("%s: %s\n", httpparam[i].key, httpparam[i].value);
+    }
+    Http_End(wfhttp, "hello wfhttpd", sizeof("hello wfhttpd") - 1);
 }
 
 int main () {
@@ -31,7 +35,7 @@ int main () {
         return -1;
     }
 */
-    if (Wf_Nio_Create_Http_Server(8080, 51200, http_required_handle, NULL)) {
+    if (Wf_Nio_Create_Http_Server(8086, 51200, http_required_handle, NULL)) {
         return -1;
     }
     Wf_Run_Event(8192);
