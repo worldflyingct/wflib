@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "../wfasyncio/wfasyncio.h"
@@ -87,6 +88,7 @@ unsigned int ParseHttpHeader (unsigned char* str,
                     offset = i + 1;
                     paramid = 0;
                     if (paramid >= *httpparam_size) {
+                        printf("http head param is too many, in %s, at %d\n", __FILE__, __LINE__);
                         return 0;
                     }
                     httpparam[paramid].key = str + offset;
@@ -116,8 +118,8 @@ unsigned int ParseHttpHeader (unsigned char* str,
                     offset = i + 1;
                     paramid++;
                     if (paramid >= *httpparam_size) {
+                        printf("http head param is too many, in %s, at %d\n", __FILE__, __LINE__);
                         return 0;
-                        break;
                     }
                     httpparam[paramid].key = str + offset;
                     status = PARAMKEY;
@@ -128,6 +130,7 @@ unsigned int ParseHttpHeader (unsigned char* str,
                 break;
         }
     }
+    printf("unknown issue, in %s, at %d\n", __FILE__, __LINE__);
     return 0;
 }
 
@@ -152,10 +155,24 @@ int Http_Error_Finish (WF_NIO *asyncio, int fd, void *ptr, uint32_t events) {
 }
 
 int Http_End (WFHTTP* wfhttp, unsigned char *data, unsigned int size) {
-    static unsigned char buff[4096];
+    static unsigned char* buff = NULL;
+    static unsigned int buff_size = 0;
+    if (buff_size < size + 102) {
+        if (buff_size > 0) {
+            free(buff);
+        }
+        buff_size = size + 102;
+        buff = (unsigned char*)malloc(buff_size);
+        if (buff == NULL) {
+            printf("malloc fail, size: %d, in %s, at %d\n", buff_size, __FILE__, __LINE__);
+            buff_size = 0;
+            return -1;
+        }
+    }
     unsigned int header_size = sprintf(buff, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-length: %d\r\nAccess-Control-Allow-Origin: *\r\n\r\n", size);
     memcpy(buff + header_size, data, size);
     Wf_Nio_Write_fd(wfhttp->asyncio, buff, header_size + size, Http_Write_Finish, Http_Error_Finish);
+    return 0;
 }
 
 int Receive_Http_Data (WF_NIO *asyncio, int fd, void *ptr, void* data, unsigned int size) {
@@ -166,9 +183,14 @@ int Receive_Http_Data (WF_NIO *asyncio, int fd, void *ptr, void* data, unsigned 
     HTTPPARAM httpparam[1024];
     unsigned int httpparam_size = 1024;
     unsigned int httpheader_len = ParseHttpHeader(data, size, &httpmethod, &path, &path_len, &version, httpparam, &httpparam_size);
+    if (!httpheader_len) {
+        printf("http parse fail, in %s, at %d\n", __FILE__, __LINE__);
+        return -1;
+    }
     WFHTTP *wfhttp = ptr;
     wfhttp->asyncio = asyncio;
     wfhttp->requirehandle(wfhttp, fd, wfhttp->ptr, data + httpheader_len, size - httpheader_len, httpmethod, path, path_len, version, httpparam, httpparam_size);
+    return 0;
 }
 
 int Accept_Http_Socket (WF_NIO *asyncio, int fd, void *ptr, int newfd) {
